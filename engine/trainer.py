@@ -44,7 +44,9 @@ class Trainer:
         if teacher_model_path:
             print(f"Initializing YOLOv11L teacher model from: {teacher_model_path}")
             self.teacher_model = YOLOv11LTeacher(teacher_model_path).to(self.device)
-            self.distillation_loss = DistillationLoss(temperature=temperature)
+            # Enable debug mode for first few batches to help understand distillation issues
+            self.distillation_loss = DistillationLoss(temperature=temperature, debug=True)
+            print("Distillation enabled with debug mode")
         
         # create optimizer
         self.optimizer = create_optimizer(self.model, base_lr)
