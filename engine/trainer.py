@@ -19,7 +19,7 @@ class Trainer:
                  eval_anno_dir, base_lr, max_epoch=300, warmup_step=300,
                  cycle_epoch=40, snapshot_epoch=10, device=None, 
                  pre_weight_dir=None, teacher_model_path=None,
-                 distill_weight=0.5, temperature=2.0):
+                 distill_weight=0.5, temperature=2.0, debug_distill=False):
         self.train_loss_list = []
         self.distill_loss_list = []
         self.total_loss_list = []
@@ -44,9 +44,12 @@ class Trainer:
         if teacher_model_path:
             print(f"Initializing YOLOv11L teacher model from: {teacher_model_path}")
             self.teacher_model = YOLOv11LTeacher(teacher_model_path).to(self.device)
-            # Enable debug mode for first few batches to help understand distillation issues
-            self.distillation_loss = DistillationLoss(temperature=temperature, debug=True)
-            print("Distillation enabled with debug mode")
+            # Initialize distillation loss with configurable debug mode
+            self.distillation_loss = DistillationLoss(temperature=temperature, debug=debug_distill)
+            if debug_distill:
+                print("Distillation enabled with debug mode ON")
+            else:
+                print("Distillation enabled with debug mode OFF")
         
         # create optimizer
         self.optimizer = create_optimizer(self.model, base_lr)

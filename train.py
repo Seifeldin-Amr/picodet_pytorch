@@ -16,6 +16,7 @@ def Args():
     parser.add_argument("--teacher_model", default=None, type=str, help="Path to YOLOv11L teacher model")
     parser.add_argument("--distill_weight", default=0.5, type=float, help="Weight of distillation loss (0-1)")
     parser.add_argument("--temperature", default=2.0, type=float, help="Temperature for knowledge distillation")
+    parser.add_argument("--debug_distill", action="store_true", help="Enable debug mode for distillation")
     return parser.parse_args()
 
 
@@ -67,7 +68,8 @@ def train():
                       device=DEVICE, pre_weight_dir=config['pretrain_weight'],
                       teacher_model_path=args.teacher_model,
                       distill_weight=args.distill_weight,
-                      temperature=args.temperature)
+                      temperature=args.temperature,
+                      debug_distill=args.debug_distill)
 
     trainer.train(args.total_epoch)
 
