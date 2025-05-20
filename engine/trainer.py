@@ -10,16 +10,20 @@ from .dataset import *
 from .utils import save_loss_plot, save_model, resume_paras, resume_state
 from picodet.utils import get_categories, get_infer_results, visualize_results
 from picodet.coco_metric import COCOMetric
-
+from .yolo_teacher import YOLOv11LTeacher
+from .distillation import DistillationLoss
 
 
 class Trainer:
     def __init__(self, train_loader, eval_loader, model, output_dir,
-                 eval_anno_dir, base_lr, max_epoch=300,warmup_step=300,
-                 cycle_epoch=40, snapshot_epoch=10,
-                 device=None, pre_weight_dir=None):
-        self.train_loss_list=[]
-        self.model = model
+                 eval_anno_dir, base_lr, max_epoch=300, warmup_step=300,
+                 cycle_epoch=40, snapshot_epoch=10, device=None, 
+                 pre_weight_dir=None, teacher_model_path=None,
+                 distill_weight=0.5, temperature=2.0):
+        self.train_loss_list = []
+        self.distill_loss_list = []
+        self.total_loss_list = []
+        self.model = model  # Student model (PicoDet)
         self.eval_anno_dir = eval_anno_dir
         self.train_loader = train_loader
         self.eval_loader = eval_loader
@@ -31,6 +35,17 @@ class Trainer:
         self.warmup_step = warmup_step
         self.cycle_epoch = cycle_epoch
         self.snapshot_epoch = snapshot_epoch
+        
+        # Initialize teacher model if path is provided
+        self.teacher_model = None
+        self.distillation_loss = None
+        self.distill_weight = distill_weight
+        
+        if teacher_model_path:
+            print(f"Initializing YOLOv11L teacher model from: {teacher_model_path}")
+            self.teacher_model = YOLOv11LTeacher(teacher_model_path).to(self.device)
+            self.distillation_loss = DistillationLoss(temperature=temperature)
+        
         # create optimizer
         self.optimizer = create_optimizer(self.model, base_lr)
 
@@ -39,7 +54,7 @@ class Trainer:
             step_per_epoch = len(train_loader)
             max_iter = max_epoch * step_per_epoch
             self.lr_scheduler = WarmupCosineSchedule(self.optimizer,
-                                                 warmup_step,max_iter)
+                                                 warmup_step, max_iter)
             # create ema
             self.model_ema = ModelEMA(self.model, cycle_epoch=cycle_epoch)
 
@@ -73,52 +88,69 @@ class Trainer:
             #print(f'prog_bar time: {e-s}')
             start = time.time()
             for i, data in enumerate(prog_bar):
-            #for i, data in enumerate(self.train_loader):
-                #print(data)
                 s = time.time()
                 # data to device
                 images, targets = data
                 images = list(image.to(self.device) for image in images)
                 targets = [{k: v.to(self.device) for k,v in t.items()} for t in targets]
                 inputs = (images, targets)
-                """
-                print("image dtype")
-                print(images[0].dtype)
-                print("target dtype")
-                for v in targets[0].values():
-                    if hasattr(v, 'dtype'):
-                        print(v.dtype)
-                """
-                # model forward
-                outputs = self.model(inputs)
-                loss = outputs['loss']
-                #print(loss)
+                
+                # Get teacher outputs if available
+                teacher_outputs = None
+                if self.teacher_model:
+                    teacher_outputs = self.teacher_model(inputs)
+                
+                # Forward pass for student model
+                student_outputs = self.model(inputs)
+                loss = student_outputs['loss']
+                
+                # Add distillation loss if teacher model is available
+                distill_loss_value = 0.0
+                if self.teacher_model and self.distillation_loss:
+                    distill_loss = self.distillation_loss(student_outputs, teacher_outputs)
+                    distill_loss_value = distill_loss.detach().cpu().item()
+                    self.distill_loss_list.append(distill_loss_value)
+                    
+                    # Combine with student loss
+                    total_loss = (1 - self.distill_weight) * loss + self.distill_weight * distill_loss
+                else:
+                    total_loss = loss
+                    
                 loss_value = loss.detach().cpu().item()
-
+                total_loss_value = total_loss.detach().cpu().item()
+                
                 self.train_loss_list.append(loss_value)
+                self.total_loss_list.append(total_loss_value)
 
-                # model backward
-                loss.backward()
+                # Backward pass with combined loss
+                total_loss.backward()
                 self.optimizer.step()
                 self.lr_scheduler.step()
                 self.optimizer.zero_grad()
                 self.model_ema.update(self.model)
 
-                prog_bar.set_description(desc=f"Loss:{loss_value:.4f}")
-                #print(f"Loss:{loss_value:.4f}")
-                if loss_value < best_loss:
-                    best_loss = loss_value
+                # Display progress with both losses if using distillation
+                if self.teacher_model:
+                    desc = f"Loss:{loss_value:.4f} Distill:{distill_loss_value:.4f} Total:{total_loss_value:.4f}"
+                else:
+                    desc = f"Loss:{loss_value:.4f}"
+                    
+                prog_bar.set_description(desc=desc)
+                
+                if total_loss_value < best_loss:
+                    best_loss = total_loss_value
                     save_model('local_best_model', self.output_dir,
                                epoch, self.model, self.optimizer)
 
-                del data,inputs,loss
+                del data, inputs, loss
+                if self.teacher_model:
+                    del teacher_outputs
                 torch.cuda.empty_cache()
                 e = time.time()
                 #print(f'data fetch-calculate time: {e - s}')
 
             end = time.time()
             print(f"Took {((end - start) / 60): .3f} minutes for epoch {epoch + 1}")
-
 
             # use ema to ensure the model is not trapped in the local optimum
             # and save ema_best
@@ -143,9 +175,15 @@ class Trainer:
                 self.model.train()
 
             save_loss_plot("loss_plot_final", self.output_dir, self.train_loss_list)
+            if self.teacher_model:
+                # Also save the distillation loss plot
+                save_loss_plot("distill_loss_plot_final", self.output_dir, self.distill_loss_list)
+                save_loss_plot("total_loss_plot_final", self.output_dir, self.total_loss_list)
+                
             save_model("model_final", self.output_dir, num_epochs,
                        self.model, self.optimizer)
 
+    # Rest of the Trainer class methods remain the same
     def eval_for_model_ema(self):
         with torch.no_grad():
             print('Evaluating...')

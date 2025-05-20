@@ -10,9 +10,12 @@ def Args():
     parser.add_argument("--device", default='cuda', type=str)
     parser.add_argument("--config", default="configs/coco2017.yml", type=str)
     parser.add_argument("--total_epoch", default=30, type=int)
-
     parser.add_argument("--pretrain_weight", default=None, type=str)
     parser.add_argument("--output_dir", default=None, type=str)
+    # Knowledge distillation arguments
+    parser.add_argument("--teacher_model", default=None, type=str, help="Path to YOLOv11L teacher model")
+    parser.add_argument("--distill_weight", default=0.5, type=float, help="Weight of distillation loss (0-1)")
+    parser.add_argument("--temperature", default=2.0, type=float, help="Temperature for knowledge distillation")
     return parser.parse_args()
 
 
@@ -56,12 +59,15 @@ def train():
     val_loader = create_val_loader(val_dataset, batch_size=config['val_batch_size'],
                                    num_workers=config['num_workers'])
 
-    # create trainer, begin trainning
+    # create trainer, begin training
     trainer = Trainer(train_loader, val_loader, model,
                       config['output_dir'], val_anno_dir, base_lr=config['base_lr'],
-                      max_epoch=config['max_epoch'],warmup_step=config['warmup_step'],
+                      max_epoch=config['max_epoch'], warmup_step=config['warmup_step'],
                       cycle_epoch=config['cycle_epoch'], snapshot_epoch=config['snapshot_epoch'],
-                      device=DEVICE, pre_weight_dir=config['pretrain_weight'])
+                      device=DEVICE, pre_weight_dir=config['pretrain_weight'],
+                      teacher_model_path=args.teacher_model,
+                      distill_weight=args.distill_weight,
+                      temperature=args.temperature)
 
     trainer.train(args.total_epoch)
 
