@@ -149,35 +149,46 @@ class COCODataset(Dataset):
         scale_factor = torch.tensor([to_h / ori_h, to_w / ori_w])
 
         # get image
-        #image =io.imread(record['im_path'])
         image = Image.open(tmp['im_path'])
         if image.mode != 'RGB':
             image = image.convert('RGB')
+        
         # apply image augmentation
         if self.transform:
             # decode image to rgb numpy form
             image = np.array(image)
             
-            # Convert tensor classes to integer list for Albumentations
-            gt_classes = tmp['gt_class'].squeeze().cpu().numpy().tolist()
-            # Make sure gt_classes is a list of integers, not tensors
-            if not isinstance(gt_classes, list):
-                gt_classes = [gt_classes]
+            # Convert tensor classes to primitive python integers (not tensors or numpy arrays)
+            gt_classes = []
+            for i in range(tmp['gt_class'].shape[0]):
+                # Extract each class as a simple Python integer
+                gt_classes.append(int(tmp['gt_class'][i][0].item()))
             
-            sample = self.transform(image=image,
-                               bboxes=tmp['gt_bbox'].cpu().numpy(),
-                               classes=gt_classes)
+            # Convert bounding boxes to numpy array properly
+            bbox_numpy = []
+            for i in range(tmp['gt_bbox'].shape[0]):
+                # Convert each bbox to a list of floats
+                bbox = [float(x) for x in tmp['gt_bbox'][i].cpu().numpy()]
+                bbox_numpy.append(bbox)
+            
+            # Apply transform with plain Python lists
+            sample = self.transform(
+                image=image,
+                bboxes=bbox_numpy,
+                classes=gt_classes
+            )
 
             image_input = sample['image']
-            gt_bbox = torch.tensor(sample['bboxes'], dtype=torch.float32)
-            # Convert classes back to tensors with correct shape
-            if len(sample['classes']) > 0:
+            
+            # Handle returned bounding boxes and classes
+            if len(sample['bboxes']) > 0:
+                gt_bbox = torch.tensor(sample['bboxes'], dtype=torch.float32)
                 gt_class = torch.tensor(sample['classes'], dtype=torch.int64).view(-1, 1)
             else:
+                gt_bbox = torch.zeros((0, 4), dtype=torch.float32)
                 gt_class = torch.zeros((0, 1), dtype=torch.int64)
         else:
             # manually resize image and normalize
-            # resized_image = resize(image,self.to_size)
             resized_image = transforms.Resize(self.to_size)(image)
             resized_image = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                                  std=[0.229, 0.224, 0.225])(resized_image)
@@ -186,6 +197,7 @@ class COCODataset(Dataset):
                 [to_h / ori_h, to_w / ori_w, to_h / ori_h, to_w / ori_w]).unsqueeze(0)
             image_input = transforms.ToTensor()(resized_image)  # tensor
             gt_class = tmp['gt_class']
+            
         targets['im_id'] = tmp['im_id']  # tensor
         targets['is_crowd'] = tmp['is_crowd']  # tensor
         targets['gt_class'] = gt_class  # tensor
@@ -194,48 +206,4 @@ class COCODataset(Dataset):
         targets['im_shape'] = torch.tensor(self.to_size)  # tensor
         targets['scale_factor'] = scale_factor  # tensor
         self._cur_iter += 1
-        #print(image_input.size())
-        #print(targets)
         return image_input, targets
-
-    """
-    def __getitem__(self, idx):
-        tmp = copy.deepcopy(self.records[idx])
-        record = { }
-
-        # get image
-        # image =io.imread(record['im_path'])
-        image = Image.open(tmp['im_path'])
-        # resize image
-        # resized_image = resize(image,self.to_size)
-        resized_image = transforms.Resize(self.to_size)(image)
-
-        to_h, to_w = self.to_size
-        ori_h, ori_w = tmp['im_shape']
-        scale_factor = torch.tensor([to_h / ori_h, to_w / ori_w])
-
-        # resize bounding box
-        gt_bbox = tmp['gt_bbox'] * torch.tensor(
-            [to_h / ori_h, to_w / ori_w, to_h / ori_h, to_w / ori_w]).unsqueeze(0)
-
-        # image augmentation
-        if self.transform:
-            sample = self.transform(image=resized_image,
-                                    bboxes=gt_bbox,
-                                    labels=tmp['gt_class'])
-
-            resized_image = sample['image']
-            gt_bbox = torch.tensor(sample['bboxes'])
-
-        record['im_id'] = tmp['im_id']
-        record['is_crowd'] = tmp['is_crowd']
-        record['gt_class'] = tmp['gt_class']
-        record['gt_bbox'] = gt_bbox
-        record['curr_iter'] = torch.tensor([self._cur_iter])
-        record['image'] = transforms.ToTensor()(resized_image)
-        record['im_shape'] = torch.tensor(self.to_size)
-        record['scale_factor'] = scale_factor
-        self._cur_iter += 1
-        # print(record)
-        return record
-    """
