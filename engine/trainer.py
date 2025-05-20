@@ -108,7 +108,14 @@ class Trainer:
                 distill_loss_value = 0.0
                 if self.teacher_model and self.distillation_loss:
                     distill_loss = self.distillation_loss(student_outputs, teacher_outputs)
-                    distill_loss_value = distill_loss.detach().cpu().item()
+                    
+                    # Fix: Check if distill_loss is a tensor before calling detach()
+                    if isinstance(distill_loss, torch.Tensor):
+                        distill_loss_value = distill_loss.detach().cpu().item()
+                    else:
+                        # It's already a float or scalar
+                        distill_loss_value = float(distill_loss)
+                    
                     self.distill_loss_list.append(distill_loss_value)
                     
                     # Combine with student loss
