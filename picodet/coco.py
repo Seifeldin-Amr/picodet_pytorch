@@ -155,26 +155,26 @@ class COCODataset(Dataset):
             image = image.convert('RGB')
         # apply image augmentation
         if self.transform:
-            #img_trans, det_trans = self.transform
             # decode image to rgb numpy form
             image = np.array(image)
-            #image = img_trans(image=image)['image']
-            #print(image)
-            #print('--------')
-            #print(tmp['im_path'])
-            #print(image.shape)
-            #print(tmp['gt_bbox'].shape)
-            #print(tmp['gt_class'].shape)
+            
+            # Convert tensor classes to integer list for Albumentations
+            gt_classes = tmp['gt_class'].squeeze().cpu().numpy().tolist()
+            # Make sure gt_classes is a list of integers, not tensors
+            if not isinstance(gt_classes, list):
+                gt_classes = [gt_classes]
+            
             sample = self.transform(image=image,
-                               bboxes=tmp['gt_bbox'],
-                               classes=tmp['gt_class'])
-            #print(tmp['gt_bbox'])
+                               bboxes=tmp['gt_bbox'].cpu().numpy(),
+                               classes=gt_classes)
 
             image_input = sample['image']
-            gt_bbox = torch.tensor(sample['bboxes'],dtype=torch.float32)
-            gt_class = torch.stack(sample['classes'],dim=0)
-            #print(sample['bboxes'])
-            #print(gt_bbox)
+            gt_bbox = torch.tensor(sample['bboxes'], dtype=torch.float32)
+            # Convert classes back to tensors with correct shape
+            if len(sample['classes']) > 0:
+                gt_class = torch.tensor(sample['classes'], dtype=torch.int64).view(-1, 1)
+            else:
+                gt_class = torch.zeros((0, 1), dtype=torch.int64)
         else:
             # manually resize image and normalize
             # resized_image = resize(image,self.to_size)

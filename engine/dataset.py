@@ -67,20 +67,13 @@ def create_val_loader(val_dataset,batch_size=1, num_workers=0):
 
 def create_train_transform(to_size):
     height, width = to_size
-    #img_trans = A.Compose([
-    #    A.GridDropout(),
-    #])
+    # Removed all augmentations, keeping only resizing and normalization
     det_trans = A.Compose([
-        A.HueSaturationValue(hue_shift_limit=0),
-        A.HorizontalFlip(p=0.5),
-        A.RandomBrightnessContrast(p=0.5),
-        A.HueSaturationValue(p=0.5),
-        A.RandomSizedBBoxSafeCrop(height,width,erosion_rate=0.4, p=0.5),
-        A.Resize(height,width),
-        A.Normalize(mean=(0.485, 0.456, 0.406),std=(0.229, 0.224, 0.225)),
+        A.Resize(height, width),
+        A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
         ToTensorV2(p=1.0),
     ], bbox_params=A.BboxParams(
-        format= 'pascal_voc',
+        format='pascal_voc',
         label_fields=['classes']
     ))
     return det_trans
@@ -89,11 +82,11 @@ def create_train_transform(to_size):
 def create_val_transform(to_size):
     height, width = to_size
     return A.Compose([
-        A.Resize(height,width),
-        A.Normalize(mean=(0.485, 0.456, 0.406),std=(0.229, 0.224, 0.225)),
+        A.Resize(height, width),
+        A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
         ToTensorV2(p=1.0),
     ], bbox_params=A.BboxParams(
-        format= 'pascal_voc',
+        format='pascal_voc',
         label_fields=['classes']
     ))
 
