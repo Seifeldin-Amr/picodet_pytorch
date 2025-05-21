@@ -9,8 +9,9 @@ class YOLOv11LTeacher(nn.Module):
     """
     A wrapper for YOLOv11L model to be used as a teacher in knowledge distillation
     """
-    def __init__(self, pretrained_path=None):
+    def __init__(self, pretrained_path=None, debug=False):
         super(YOLOv11LTeacher, self).__init__()
+        self.debug = debug
         # Load YOLOv11L model from torchvision or a custom implementation
         try:
             # Try to import from ultralytics if available
@@ -56,24 +57,27 @@ class YOLOv11LTeacher(nn.Module):
                         outputs = self._process_yolo_outputs(results)
                         
                         # Debug: check what's in the outputs
-                        print("\nYOLO teacher outputs:")
-                        for key, value in outputs.items():
-                            if isinstance(value, list):
-                                print(f"  - {key}: List with {len(value)} elements")
-                                if value and hasattr(value[0], 'shape'):
-                                    print(f"    First element shape: {value[0].shape}")
-                            else:
-                                print(f"  - {key}: {type(value)}")
+                        if self.debug:
+                            print("\nYOLO teacher outputs:")
+                            for key, value in outputs.items():
+                                if isinstance(value, list):
+                                    print(f"  - {key}: List with {len(value)} elements")
+                                    if value and hasattr(value[0], 'shape'):
+                                        print(f"    First element shape: {value[0].shape}")
+                                else:
+                                    print(f"  - {key}: {type(value)}")
                         
                         # If there are no feature maps, try to extract them directly
                         if 'feature_maps' not in outputs or not outputs['feature_maps']:
-                            print("No feature maps found in YOLO output, attempting to extract features from backbone")
+                            if self.debug:
+                                print("No feature maps found in YOLO output, attempting to extract features from backbone")
                             # Try to get features directly from the model
                             return self._extract_features_manually(images)
                         
                         return outputs
                     except Exception as e:
-                        print(f"YOLO inference error: {e}")
+                        if self.debug:
+                            print(f"YOLO inference error: {e}")
                         # Fallback to feature extractor if prediction fails
                         return self._extract_features_manually(images)
                 else:
@@ -121,16 +125,19 @@ class YOLOv11LTeacher(nn.Module):
             # YOLOv8 models store feature maps in different places depending on version
             if hasattr(results[0], 'feature_maps'):
                 teacher_outputs['feature_maps'] = [r.feature_maps for r in results]
-                print(f"Found feature_maps in results object")
+                if self.debug:
+                    print(f"Found feature_maps in results object")
             elif hasattr(results[0], 'features'):
                 teacher_outputs['feature_maps'] = [r.features for r in results]
-                print(f"Found features in results object")
+                if self.debug:
+                    print(f"Found features in results object")
             elif hasattr(results[0], 'probs'):
                 teacher_outputs['probs'] = [r.probs for r in results]
-                print(f"Found probs in results object")
+                if self.debug:
+                    print(f"Found probs in results object")
                 
             # Try to access the model's feature extractor
-            if not teacher_outputs.get('feature_maps'):
+            if not teacher_outputs.get('feature_maps') and self.debug:
                 if hasattr(self.model, 'model') and hasattr(self.model.model, 'backbone'):
                     print("Trying to extract features from YOLO backbone directly")
                     # This is a placeholder - actual implementation would depend on YOLO version
@@ -145,20 +152,24 @@ class YOLOv11LTeacher(nn.Module):
                 if hasattr(r, 'boxes'):
                     if hasattr(r.boxes, 'xyxy') and len(r.boxes.xyxy) > 0:
                         boxes.append(r.boxes.xyxy)
-                        print(f"Found boxes: {r.boxes.xyxy.shape}")
+                        if self.debug:
+                            print(f"Found boxes: {r.boxes.xyxy.shape}")
                     
                     if hasattr(r.boxes, 'conf') and len(r.boxes.conf) > 0:
                         scores.append(r.boxes.conf)
-                        print(f"Found confidence scores: {r.boxes.conf.shape}")
+                        if self.debug:
+                            print(f"Found confidence scores: {r.boxes.conf.shape}")
                     
                     if hasattr(r.boxes, 'cls') and len(r.boxes.cls) > 0:
                         class_scores.append(r.boxes.cls)
-                        print(f"Found class scores: {r.boxes.cls.shape}")
+                        if self.debug:
+                            print(f"Found class scores: {r.boxes.cls.shape}")
                     
                 # Try to get raw predictions if available
                 if hasattr(r, 'probs'):
                     teacher_outputs['probs'] = r.probs
-                    print(f"Found probability outputs: {r.probs.shape if hasattr(r.probs, 'shape') else 'unknown shape'}")
+                    if self.debug:
+                        print(f"Found probability outputs: {r.probs.shape if hasattr(r.probs, 'shape') else 'unknown shape'}")
             
             if boxes:
                 teacher_outputs['boxes'] = boxes
@@ -166,7 +177,8 @@ class YOLOv11LTeacher(nn.Module):
                 if class_scores:
                     teacher_outputs['class_scores'] = class_scores
         except Exception as e:
-            print(f"Error processing YOLO outputs: {e}")
+            if self.debug:
+                print(f"Error processing YOLO outputs: {e}")
             # Return empty outputs on error
             teacher_outputs = {
                 'feature_maps': [],
@@ -176,7 +188,8 @@ class YOLOv11LTeacher(nn.Module):
         
         # If no outputs were obtained, provide a fallback
         if not teacher_outputs:
-            print("No outputs extracted from YOLO model, using empty fallback")
+            if self.debug:
+                print("No outputs extracted from YOLO model, using empty fallback")
             teacher_outputs = {
                 'feature_maps': [],
                 'boxes': [],
@@ -193,7 +206,8 @@ class YOLOv11LTeacher(nn.Module):
             device = next(self.model.parameters()).device
             # For YOLOv8/v11, we need to access the backbone
             if hasattr(self.model, 'model') and hasattr(self.model.model, 'backbone'):
-                print("Extracting features from backbone")
+                if self.debug:
+                    print("Extracting features from backbone")
                 # Convert tensor images to format expected by YOLO backbone
                 processed_images = []
                 for img in images:
@@ -205,10 +219,11 @@ class YOLOv11LTeacher(nn.Module):
                 # In production you'd need to properly run the backbone with the right preprocessing
                 features = []
                 return {'feature_maps': features, 'boxes': [], 'scores': []}
-            else:
+            elif self.debug:
                 print("Cannot extract features: backbone not accessible")
         except Exception as e:
-            print(f"Error extracting features manually: {e}")
+            if self.debug:
+                print(f"Error extracting features manually: {e}")
         
         # Return empty outputs if feature extraction fails
         return {

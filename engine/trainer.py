@@ -43,7 +43,8 @@ class Trainer:
         
         if teacher_model_path:
             print(f"Initializing YOLOv11L teacher model from: {teacher_model_path}")
-            self.teacher_model = YOLOv11LTeacher(teacher_model_path).to(self.device)
+            # Pass the debug flag to the YOLOv11L teacher model
+            self.teacher_model = YOLOv11LTeacher(teacher_model_path, debug=debug_distill).to(self.device)
             # Initialize distillation loss with configurable debug mode
             self.distillation_loss = DistillationLoss(temperature=temperature, debug=debug_distill)
             if debug_distill:
