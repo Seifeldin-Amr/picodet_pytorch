@@ -23,6 +23,8 @@ class Trainer:
         self.train_loss_list = []
         self.distill_loss_list = []
         self.total_loss_list = []
+        self.val_loss_list = []  # Track validation loss
+        self.val_map_list = []   # Track validation mAP
         self.model = model  # Student model (PicoDet)
         self.eval_anno_dir = eval_anno_dir
         self.train_loader = train_loader
@@ -165,6 +167,12 @@ class Trainer:
             end = time.time()
             print(f"Took {((end - start) / 60): .3f} minutes for epoch {epoch + 1}")
 
+            # Validation step
+            val_loss, val_map = self.validate()
+            self.val_loss_list.append(val_loss)
+            self.val_map_list.append(val_map)
+            print(f"Validation Loss: {val_loss:.4f}, Validation mAP: {val_map:.4f}")
+
             # use ema to ensure the model is not trapped in the local optimum
             # and save ema_best
             is_snapshot = ((epoch + 1) % self.snapshot_epoch == 0) or (epoch == num_epochs - 1)
@@ -188,6 +196,8 @@ class Trainer:
                 self.model.train()
 
             save_loss_plot("loss_plot_final", self.output_dir, self.train_loss_list)
+            save_loss_plot("val_loss_plot_final", self.output_dir, self.val_loss_list)
+            save_loss_plot("val_map_plot_final", self.output_dir, self.val_map_list)
             if self.teacher_model:
                 # Also save the distillation loss plot
                 save_loss_plot("distill_loss_plot_final", self.output_dir, self.distill_loss_list)
@@ -195,6 +205,36 @@ class Trainer:
                 
             save_model("model_final", self.output_dir, num_epochs,
                        self.model, self.optimizer)
+
+    def validate(self):
+        with torch.no_grad():
+            print('Validating...')
+            self.model.eval()
+            val_loss = 0.0
+            val_map = 0.0
+            program_bar = tqdm(self.eval_loader, total=len(self.eval_loader))
+            start = time.time()
+
+            for i, data in enumerate(program_bar):
+                images, targets = data
+                images = list(image.to(self.device) for image in images)
+                targets = [{k: v.to(self.device) for k, v in t.items()} for t in targets]
+                inputs = (images, targets)
+                outs = self.model(inputs)
+                loss = outs['loss']
+                val_loss += loss.detach().cpu().item()
+                self.coco_metric.update(inputs, outs)
+                del data, outs
+                torch.cuda.empty_cache()
+
+            end = time.time()
+            print(f"Took {((end - start) / 60): .3f} minutes for validation")
+            print("---------------------------------------------")
+            self.coco_metric.accumulate()
+            bbox_eval_results = self.coco_metric.get_results()['bbox']
+            val_map = bbox_eval_results[0]
+            self.coco_metric.reset()
+            return val_loss / len(self.eval_loader), val_map
 
     # Rest of the Trainer class methods remain the same
     def eval_for_model_ema(self):
